@@ -1,15 +1,11 @@
 -- =====================================================
--- Migration: Initialize Agent System
--- Safe & Idempotent
+-- Migration: Initialize Agent System (Fixed)
 -- =====================================================
 
--- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- =====================================================
--- 1. Add missing columns to ai_agents
--- =====================================================
+-- Add missing columns
 ALTER TABLE public.ai_agents
   ADD COLUMN IF NOT EXISTS parent_agent_id uuid REFERENCES public.ai_agents(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS level int NOT NULL DEFAULT 0;
@@ -17,24 +13,20 @@ ALTER TABLE public.ai_agents
 CREATE INDEX IF NOT EXISTS ai_agents_parent_agent_id_idx 
   ON public.ai_agents (parent_agent_id);
 
--- =====================================================
--- 2. Seed the three core orchestrators
--- =====================================================
+-- Seed the three core orchestrators (FIXED hosting_status)
 INSERT INTO public.ai_agents (name, slug, status, hosting_status, created_by, level, system_prompt)
-SELECT 'BrahmAI', 'brahmai', 'active', 'live', 'system', 0, 'You are BrahmAI, the top-level orchestrator.'
+SELECT 'BrahmAI', 'brahmai', 'active', 'not_hosted', 'system', 0, 'You are BrahmAI, the top-level orchestrator.'
 WHERE NOT EXISTS (SELECT 1 FROM public.ai_agents WHERE slug = 'brahmai');
 
 INSERT INTO public.ai_agents (name, slug, status, hosting_status, created_by, level, system_prompt)
-SELECT 'VishvAI', 'vishvai', 'active', 'live', 'system', 0, 'You are VishvAI, the top-level orchestrator.'
+SELECT 'VishvAI', 'vishvai', 'active', 'not_hosted', 'system', 0, 'You are VishvAI, the top-level orchestrator.'
 WHERE NOT EXISTS (SELECT 1 FROM public.ai_agents WHERE slug = 'vishvai');
 
 INSERT INTO public.ai_agents (name, slug, status, hosting_status, created_by, level, system_prompt)
-SELECT 'KaalAI', 'kaalai', 'active', 'live', 'system', 0, 'You are KaalAI, the top-level orchestrator.'
+SELECT 'KaalAI', 'kaalai', 'active', 'not_hosted', 'system', 0, 'You are KaalAI, the top-level orchestrator.'
 WHERE NOT EXISTS (SELECT 1 FROM public.ai_agents WHERE slug = 'kaalai');
 
--- =====================================================
--- 3. Create agent_messages table
--- =====================================================
+-- Create agent_messages table
 CREATE TABLE IF NOT EXISTS public.agent_messages (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   agent_slug    text NOT NULL,
@@ -48,9 +40,7 @@ CREATE TABLE IF NOT EXISTS public.agent_messages (
 CREATE INDEX IF NOT EXISTS agent_messages_agent_slug_created_at_idx
   ON public.agent_messages (agent_slug, created_at DESC);
 
--- =====================================================
--- 4. Enable RLS
--- =====================================================
+-- Enable RLS
 ALTER TABLE public.ai_agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_hosting ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_access ENABLE ROW LEVEL SECURITY;
@@ -58,9 +48,7 @@ ALTER TABLE public.agent_dependencies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_destruction_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_messages ENABLE ROW LEVEL SECURITY;
 
--- =====================================================
--- 5. RLS Policies
--- =====================================================
+-- RLS Policies
 DROP POLICY IF EXISTS "anon read ai_agents" ON public.ai_agents;
 CREATE POLICY "anon read ai_agents" ON public.ai_agents FOR SELECT USING (true);
 
