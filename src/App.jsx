@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
+import ChatPanel from './components/ChatPanel'
+import Hierarchy from './components/Hierarchy'
 
 function StatusBadge({ status }) {
   return <span className={`status ${status}`}>{status}</span>
@@ -20,8 +22,7 @@ export default function App() {
   const [connection, setConnection] = useState('Connecting...')
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    async function load() {
+  const load = useCallback(async () => {
       try {
         const { error } = await supabase.from('ai_agents').select('id').limit(1)
         if (error) throw error
@@ -67,11 +68,15 @@ export default function App() {
       setDependencies(d.data || [])
       setDestruction(dest.data || [])
       setLoading(false)
-    }
-    load()
   }, [])
 
+  useEffect(() => {
+    load()
+  }, [load])
+
   const tabs = [
+    { id: 'chat', label: 'Chat' },
+    { id: 'hierarchy', label: 'Hierarchy' },
     { id: 'agents', label: 'AI Agents' },
     { id: 'hosting', label: 'Hosting' },
     { id: 'access', label: 'Access Control' },
@@ -111,11 +116,16 @@ export default function App() {
           ))}
         </div>
 
+        {tab === 'chat' ? (
+          <ChatPanel />
+        ) : (
         <div className="card">
           {loading ? (
             <div className="loading">Loading...</div>
           ) : (
             <>
+              {tab === 'hierarchy' && <Hierarchy agents={agents} onChanged={load} />}
+
               {tab === 'agents' &&
                 (agents.length === 0 ? (
                   <div className="empty">No agents found</div>
@@ -293,6 +303,7 @@ export default function App() {
             </>
           )}
         </div>
+        )}
       </div>
     </>
   )
