@@ -1,6 +1,6 @@
 # AI Agents Dashboard (BrahmAI • VishvAI • KaalAI)
 
-React + Vite dashboard connected to Supabase.
+React + Vite dashboard connected to Supabase.for testing purpose
 
 ## Setup
 
