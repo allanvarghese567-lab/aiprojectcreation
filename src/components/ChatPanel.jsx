@@ -47,7 +47,6 @@ export default function ChatPanel({ userName = 'you' }) {
         },
         (payload) => {
           setMessages((prev) => {
-            // avoid duplicates
             if (prev.some((m) => m.id === payload.new.id)) return prev
             return [...prev, payload.new]
           })
@@ -153,17 +152,33 @@ export default function ChatPanel({ userName = 'you' }) {
           )}
         </div>
 
-        <form className="chat-input-row" onSubmit={sendMessage}>
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Message ${active.name}...`}
-            disabled={sending}
-          />
-          <button type="submit" disabled={sending || !draft.trim()}>
-            {sending ? 'Sending...' : 'Send'}
-          </button>
+        {/* Grok-style input */}
+        <form className="chat-input-bar" onSubmit={sendMessage}>
+          <div className="chat-input-inner">
+            <button type="button" className="chat-icon-btn" title="Add">
+              +
+            </button>
+
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={`Message ${active.name}...`}
+              disabled={sending}
+            />
+
+            <div className="chat-input-actions">
+              <span className="chat-model-label">Fast</span>
+              <button
+                type="submit"
+                className="chat-send-btn"
+                disabled={sending || !draft.trim()}
+                title="Send"
+              >
+                ↑
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     </div>
