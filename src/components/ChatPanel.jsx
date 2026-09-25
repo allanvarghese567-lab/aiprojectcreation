@@ -15,6 +15,7 @@ export default function ChatPanel({ userName = 'you' }) {
   const [sending, setSending] = useState(false)
   const scrollRef = useRef(null)
 
+  // Load messages + Realtime subscription
   useEffect(() => {
     let cancelled = false
 
@@ -36,7 +37,7 @@ export default function ChatPanel({ userName = 'you' }) {
     loadMessages()
 
     const channel = supabase
-      .channel(`agent_messages:${activeSlug}`)
+      .channel(`messages-${activeSlug}-${Date.now()}`)
       .on(
         'postgres_changes',
         {
@@ -46,13 +47,17 @@ export default function ChatPanel({ userName = 'you' }) {
           filter: `agent_slug=eq.${activeSlug}`,
         },
         (payload) => {
+          console.log('New message received:', payload.new)
           setMessages((prev) => {
+            // Prevent duplicates
             if (prev.some((m) => m.id === payload.new.id)) return prev
             return [...prev, payload.new]
           })
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log('Realtime status:', status)
+      })
 
     return () => {
       cancelled = true
@@ -60,6 +65,7 @@ export default function ChatPanel({ userName = 'you' }) {
     }
   }, [activeSlug])
 
+  // Auto scroll to bottom
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -75,22 +81,48 @@ export default function ChatPanel({ userName = 'you' }) {
     setSending(true)
     setDraft('')
 
-    // 1. Save user message
-    const { error } = await supabase.from('agent_messages').insert({
+    // 1. Optimistic UI - show user message immediately
+    const tempId = crypto.randomUUID()
+    const tempMessage = {
+      id: tempId,
       agent_slug: activeSlug,
       role: 'user',
       content,
       created_by: userName,
-    })
+      created_at: new Date().toISOString(),
+    }
+
+    setMessages((prev) => [...prev, tempMessage])
+
+    // 2. Save user message to database
+    const { data: inserted, error } = await supabase
+      .from('agent_messages')
+      .insert({
+        agent_slug: activeSlug,
+        role: 'user',
+        content,
+        created_by: userName,
+      })
+      .select()
+      .single()
 
     if (error) {
       console.error('Failed to send message', error)
+      // Remove optimistic message on error
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
       setDraft(content)
       setSending(false)
       return
     }
 
-    // 2. Call agent-runtime
+    // Replace temp message with real one from database
+    if (inserted) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? inserted : m))
+      )
+    }
+
+    // 3. Call agent-runtime
     try {
       const { error: fnError } = await supabase.functions.invoke('agent-runtime', {
         body: {
