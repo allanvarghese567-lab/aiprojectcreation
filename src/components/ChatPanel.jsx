@@ -46,7 +46,11 @@ export default function ChatPanel({ userName = 'you' }) {
           filter: `agent_slug=eq.${activeSlug}`,
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new])
+          setMessages((prev) => {
+            // avoid duplicates
+            if (prev.some((m) => m.id === payload.new.id)) return prev
+            return [...prev, payload.new]
+          })
         }
       )
       .subscribe()
@@ -58,7 +62,10 @@ export default function ChatPanel({ userName = 'you' }) {
   }, [activeSlug])
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: 'smooth',
+    })
   }, [messages])
 
   async function sendMessage(e) {
@@ -68,16 +75,38 @@ export default function ChatPanel({ userName = 'you' }) {
 
     setSending(true)
     setDraft('')
+
+    // 1. Save user message
     const { error } = await supabase.from('agent_messages').insert({
       agent_slug: activeSlug,
       role: 'user',
       content,
       created_by: userName,
     })
+
     if (error) {
       console.error('Failed to send message', error)
       setDraft(content)
+      setSending(false)
+      return
     }
+
+    // 2. Call agent-runtime
+    try {
+      const { error: fnError } = await supabase.functions.invoke('agent-runtime', {
+        body: {
+          agent_slug: activeSlug,
+          content: content,
+        },
+      })
+
+      if (fnError) {
+        console.error('Runtime error:', fnError)
+      }
+    } catch (err) {
+      console.error('Failed to call agent-runtime', err)
+    }
+
     setSending(false)
   }
 
@@ -85,6 +114,7 @@ export default function ChatPanel({ userName = 'you' }) {
 
   return (
     <div className="chat-panel">
+      {/* Agent selector */}
       <div className="chat-agent-list">
         {ORCHESTRATORS.map((o) => (
           <button
@@ -97,23 +127,24 @@ export default function ChatPanel({ userName = 'you' }) {
         ))}
       </div>
 
+      {/* Chat body */}
       <div className="chat-body">
         <div className="chat-messages" ref={scrollRef}>
           {loading ? (
-            <div className="loading">Loading...</div>
+            <div className="loading">Loading messages...</div>
           ) : messages.length === 0 ? (
             <div className="empty">
-              No messages with {active.name} yet. This log writes straight to the{' '}
-              <span className="mono">agent_messages</span> table — wire your agent runtime to
-              read new <span className="mono">role = 'user'</span> rows for{' '}
-              <span className="mono">agent_slug = '{active.slug}'</span> and insert its own
-              replies with <span className="mono">role = 'agent'</span> to answer here.
+              No messages with <strong>{active.name}</strong> yet.
+              <br />
+              Type a message below to start the conversation.
             </div>
           ) : (
             messages.map((m) => (
               <div key={m.id} className={`chat-msg ${m.role}`}>
                 <div className="chat-msg-meta">
-                  <span>{m.role === 'agent' ? active.name : m.created_by || 'you'}</span>
+                  <span>
+                    {m.role === 'agent' ? active.name : m.created_by || 'you'}
+                  </span>
                   <span>{new Date(m.created_at).toLocaleTimeString()}</span>
                 </div>
                 <div className="chat-msg-content">{m.content}</div>
@@ -131,7 +162,7 @@ export default function ChatPanel({ userName = 'you' }) {
             disabled={sending}
           />
           <button type="submit" disabled={sending || !draft.trim()}>
-            Send
+            {sending ? 'Sending...' : 'Send'}
           </button>
         </form>
       </div>
