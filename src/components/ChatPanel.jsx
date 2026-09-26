@@ -13,9 +13,9 @@ export default function ChatPanel({ userName = 'you' }) {
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [thinking, setThinking] = useState(false) // ← new
   const scrollRef = useRef(null)
 
-  // Load messages + Realtime subscription
   useEffect(() => {
     let cancelled = false
 
@@ -47,17 +47,18 @@ export default function ChatPanel({ userName = 'you' }) {
           filter: `agent_slug=eq.${activeSlug}`,
         },
         (payload) => {
-          console.log('New message received:', payload.new)
+          // When a real agent reply arrives, stop thinking
+          if (payload.new.role === 'agent') {
+            setThinking(false)
+          }
+
           setMessages((prev) => {
-            // Prevent duplicates
             if (prev.some((m) => m.id === payload.new.id)) return prev
             return [...prev, payload.new]
           })
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime status:', status)
-      })
+      .subscribe()
 
     return () => {
       cancelled = true
@@ -65,13 +66,12 @@ export default function ChatPanel({ userName = 'you' }) {
     }
   }, [activeSlug])
 
-  // Auto scroll to bottom
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: 'smooth',
     })
-  }, [messages])
+  }, [messages, thinking])
 
   async function sendMessage(e) {
     e.preventDefault()
@@ -80,8 +80,9 @@ export default function ChatPanel({ userName = 'you' }) {
 
     setSending(true)
     setDraft('')
+    setThinking(true) // ← start thinking indicator
 
-    // 1. Optimistic UI - show user message immediately
+    // Optimistic user message
     const tempId = crypto.randomUUID()
     const tempMessage = {
       id: tempId,
@@ -91,10 +92,9 @@ export default function ChatPanel({ userName = 'you' }) {
       created_by: userName,
       created_at: new Date().toISOString(),
     }
-
     setMessages((prev) => [...prev, tempMessage])
 
-    // 2. Save user message to database
+    // Save user message
     const { data: inserted, error } = await supabase
       .from('agent_messages')
       .insert({
@@ -108,21 +108,18 @@ export default function ChatPanel({ userName = 'you' }) {
 
     if (error) {
       console.error('Failed to send message', error)
-      // Remove optimistic message on error
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
       setDraft(content)
       setSending(false)
+      setThinking(false)
       return
     }
 
-    // Replace temp message with real one from database
     if (inserted) {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? inserted : m))
-      )
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? inserted : m)))
     }
 
-    // 3. Call agent-runtime
+    // Call agent-runtime
     try {
       const { error: fnError } = await supabase.functions.invoke('agent-runtime', {
         body: {
@@ -133,19 +130,21 @@ export default function ChatPanel({ userName = 'you' }) {
 
       if (fnError) {
         console.error('Runtime error:', fnError)
+        setThinking(false)
       }
     } catch (err) {
       console.error('Failed to call agent-runtime', err)
+      setThinking(false)
     }
 
     setSending(false)
+    // Note: setThinking(false) is also called when Realtime receives the agent reply
   }
 
   const active = ORCHESTRATORS.find((o) => o.slug === activeSlug)
 
   return (
     <div className="chat-panel">
-      {/* Agent selector */}
       <div className="chat-agent-list">
         {ORCHESTRATORS.map((o) => (
           <button
@@ -158,33 +157,48 @@ export default function ChatPanel({ userName = 'you' }) {
         ))}
       </div>
 
-      {/* Chat body */}
       <div className="chat-body">
         <div className="chat-messages" ref={scrollRef}>
           {loading ? (
             <div className="loading">Loading messages...</div>
-          ) : messages.length === 0 ? (
+          ) : messages.length === 0 && !thinking ? (
             <div className="empty">
               No messages with <strong>{active.name}</strong> yet.
               <br />
               Type a message below to start the conversation.
             </div>
           ) : (
-            messages.map((m) => (
-              <div key={m.id} className={`chat-msg ${m.role}`}>
-                <div className="chat-msg-meta">
-                  <span>
-                    {m.role === 'agent' ? active.name : m.created_by || 'you'}
-                  </span>
-                  <span>{new Date(m.created_at).toLocaleTimeString()}</span>
+            <>
+              {messages.map((m) => (
+                <div key={m.id} className={`chat-msg ${m.role}`}>
+                  <div className="chat-msg-meta">
+                    <span>
+                      {m.role === 'agent' ? active.name : m.created_by || 'you'}
+                    </span>
+                    <span>{new Date(m.created_at).toLocaleTimeString()}</span>
+                  </div>
+                  <div className="chat-msg-content">{m.content}</div>
                 </div>
-                <div className="chat-msg-content">{m.content}</div>
-              </div>
-            ))
+              ))}
+
+              {/* Thinking indicator */}
+              {thinking && (
+                <div className="chat-msg agent thinking">
+                  <div className="chat-msg-meta">
+                    <span>{active.name}</span>
+                  </div>
+                  <div className="chat-msg-content thinking-text">
+                    <span className="thinking-label">Thinking</span>
+                    <span className="dot">.</span>
+                    <span className="dot">.</span>
+                    <span className="dot">.</span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Grok-style input */}
         <form className="chat-input-bar" onSubmit={sendMessage}>
           <div className="chat-input-inner">
             <button type="button" className="chat-icon-btn" title="Add">
