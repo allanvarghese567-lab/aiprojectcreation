@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import ChatPanel from './components/ChatPanel'
 import Hierarchy from './components/Hierarchy'
 import AuthModal from './components/AuthModal'
+import VendorKeys from './components/VendorKeys'
 
 function StatusBadge({ status }) {
   return <span className={`status ${status}`}>{status}</span>
@@ -122,6 +123,7 @@ export default function App() {
     { id: 'access', label: 'Access Control' },
     { id: 'dependencies', label: 'Dependencies' },
     { id: 'destruction', label: 'Destruction Log' },
+    { id: 'keys', label: 'API Keys' },          // ← new tab
   ]
 
   const userLabel = session
@@ -130,14 +132,12 @@ export default function App() {
     ? 'Guest'
     : null
 
-  // Open Host modal
   function handleHostAgent(agent) {
     setSelectedAgent(agent)
     setSelectedProvider(hostingProviders[0]?.name || '')
     setShowHostModal(true)
   }
 
-  // Confirm hosting
   async function confirmHosting() {
     if (!selectedAgent || !selectedProvider) return
     setHostingLoading(true)
@@ -164,7 +164,6 @@ export default function App() {
     }
   }
 
-  // Find hosted URL for an agent
   function getHostedUrl(agent) {
     const record = hosting.find(
       (h) => h.agent_id === agent.id || h.ai_agents?.slug === agent.slug
@@ -219,6 +218,10 @@ export default function App() {
 
         {tab === 'chat' ? (
           <ChatPanel userName={userLabel || 'you'} />
+        ) : tab === 'keys' ? (
+          <div className="card">
+            <VendorKeys />
+          </div>
         ) : (
           <div className="card">
             {loading ? (
@@ -229,7 +232,7 @@ export default function App() {
                   <Hierarchy agents={agents} onChanged={load} />
                 )}
 
-                {/* ========== AI AGENTS TAB ========== */}
+                {/* AI AGENTS */}
                 {tab === 'agents' &&
                   (agents.length === 0 ? (
                     <div className="empty">No agents found</div>
@@ -252,25 +255,14 @@ export default function App() {
                           const hostedUrl = getHostedUrl(a)
                           return (
                             <tr key={a.id}>
-                              <td>
-                                <strong>{a.name}</strong>
-                              </td>
+                              <td><strong>{a.name}</strong></td>
                               <td className="mono">{a.slug}</td>
-                              <td>
-                                <StatusBadge status={a.status} />
-                              </td>
-                              <td>
-                                <StatusBadge status={a.hosting_status} />
-                              </td>
-
-                              {/* GitHub with tooltip + link */}
+                              <td><StatusBadge status={a.status} /></td>
+                              <td><StatusBadge status={a.hosting_status} /></td>
                               <td>
                                 {a.github_repo ? (
                                   <div className="github-cell">
-                                    <span
-                                      className="mono truncate"
-                                      title={a.github_repo}
-                                    >
+                                    <span className="mono truncate" title={a.github_repo}>
                                       {a.github_repo}
                                     </span>
                                     <a
@@ -287,8 +279,6 @@ export default function App() {
                                   '—'
                                 )}
                               </td>
-
-                              {/* Actions */}
                               <td>
                                 <div className="action-buttons">
                                   {a.hosting_status === 'not_hosted' ||
@@ -315,7 +305,6 @@ export default function App() {
                                   )}
                                 </div>
                               </td>
-
                               <td>{a.created_by}</td>
                               <td>{formatDate(a.created_at)}</td>
                             </tr>
@@ -325,7 +314,7 @@ export default function App() {
                     </table>
                   ))}
 
-                {/* ========== HOSTING TAB ========== */}
+                {/* HOSTING */}
                 {tab === 'hosting' &&
                   (hosting.length === 0 ? (
                     <div className="empty">No hosting records</div>
@@ -362,9 +351,7 @@ export default function App() {
                                 '—'
                               )}
                             </td>
-                            <td>
-                              <StatusBadge status={h.status} />
-                            </td>
+                            <td><StatusBadge status={h.status} /></td>
                             <td>{h.health_status}</td>
                             <td>{h.created_by}</td>
                           </tr>
@@ -373,7 +360,7 @@ export default function App() {
                     </table>
                   ))}
 
-                {/* ========== ACCESS TAB ========== */}
+                {/* ACCESS */}
                 {tab === 'access' &&
                   (access.length === 0 ? (
                     <div className="empty">No access records</div>
@@ -404,7 +391,7 @@ export default function App() {
                     </table>
                   ))}
 
-                {/* ========== DEPENDENCIES TAB ========== */}
+                {/* DEPENDENCIES */}
                 {tab === 'dependencies' &&
                   (dependencies.length === 0 ? (
                     <div className="empty">No dependencies</div>
@@ -433,7 +420,7 @@ export default function App() {
                     </table>
                   ))}
 
-                {/* ========== DESTRUCTION TAB ========== */}
+                {/* DESTRUCTION */}
                 {tab === 'destruction' &&
                   (destruction.length === 0 ? (
                     <div className="empty">No destruction records</div>
