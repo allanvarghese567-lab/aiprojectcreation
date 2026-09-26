@@ -23,12 +23,19 @@ export default function App() {
   const [connection, setConnection] = useState('Connecting...')
   const [loading, setLoading] = useState(true)
 
-  // Auth state
+  // Auth
   const [session, setSession] = useState(null)
   const [showAuth, setShowAuth] = useState(false)
   const [isGuest, setIsGuest] = useState(false)
 
-  // Listen to auth changes
+  // Hosting modal
+  const [hostingProviders, setHostingProviders] = useState([])
+  const [showHostModal, setShowHostModal] = useState(false)
+  const [selectedAgent, setSelectedAgent] = useState(null)
+  const [selectedProvider, setSelectedProvider] = useState('')
+  const [hostingLoading, setHostingLoading] = useState(false)
+
+  // Auth listener
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -40,6 +47,19 @@ export default function App() {
     })
 
     return () => subscription.unsubscribe()
+  }, [])
+
+  // Load hosting providers
+  useEffect(() => {
+    async function loadProviders() {
+      const { data } = await supabase
+        .from('hosting_providers')
+        .select('*')
+        .eq('is_active', true)
+        .order('priority')
+      setHostingProviders(data || [])
+    }
+    loadProviders()
   }, [])
 
   const load = useCallback(async () => {
@@ -110,6 +130,48 @@ export default function App() {
     ? 'Guest'
     : null
 
+  // Open Host modal
+  function handleHostAgent(agent) {
+    setSelectedAgent(agent)
+    setSelectedProvider(hostingProviders[0]?.name || '')
+    setShowHostModal(true)
+  }
+
+  // Confirm hosting
+  async function confirmHosting() {
+    if (!selectedAgent || !selectedProvider) return
+    setHostingLoading(true)
+
+    try {
+      const { error } = await supabase.functions.invoke('vishvai-manage-hosting', {
+        body: {
+          agent_id: selectedAgent.id,
+          agent_slug: selectedAgent.slug,
+          provider: selectedProvider,
+          action: 'deploy',
+        },
+      })
+
+      if (error) throw error
+
+      alert(`Hosting started for ${selectedAgent.name} on ${selectedProvider}`)
+      setShowHostModal(false)
+      load()
+    } catch (err) {
+      alert('Hosting failed: ' + err.message)
+    } finally {
+      setHostingLoading(false)
+    }
+  }
+
+  // Find hosted URL for an agent
+  function getHostedUrl(agent) {
+    const record = hosting.find(
+      (h) => h.agent_id === agent.id || h.ai_agents?.slug === agent.slug
+    )
+    return record?.temporary_url || agent.primary_url || agent.temporary_url || null
+  }
+
   return (
     <>
       <header>
@@ -167,6 +229,7 @@ export default function App() {
                   <Hierarchy agents={agents} onChanged={load} />
                 )}
 
+                {/* ========== AI AGENTS TAB ========== */}
                 {tab === 'agents' &&
                   (agents.length === 0 ? (
                     <div className="empty">No agents found</div>
@@ -179,34 +242,90 @@ export default function App() {
                           <th>Status</th>
                           <th>Hosting</th>
                           <th>GitHub</th>
+                          <th>Actions</th>
                           <th>Created By</th>
                           <th>Created At</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {agents.map((a) => (
-                          <tr key={a.id}>
-                            <td>
-                              <strong>{a.name}</strong>
-                            </td>
-                            <td className="mono">{a.slug}</td>
-                            <td>
-                              <StatusBadge status={a.status} />
-                            </td>
-                            <td>
-                              <StatusBadge status={a.hosting_status} />
-                            </td>
-                            <td className="mono truncate">
-                              {a.github_repo || '—'}
-                            </td>
-                            <td>{a.created_by}</td>
-                            <td>{formatDate(a.created_at)}</td>
-                          </tr>
-                        ))}
+                        {agents.map((a) => {
+                          const hostedUrl = getHostedUrl(a)
+                          return (
+                            <tr key={a.id}>
+                              <td>
+                                <strong>{a.name}</strong>
+                              </td>
+                              <td className="mono">{a.slug}</td>
+                              <td>
+                                <StatusBadge status={a.status} />
+                              </td>
+                              <td>
+                                <StatusBadge status={a.hosting_status} />
+                              </td>
+
+                              {/* GitHub with tooltip + link */}
+                              <td>
+                                {a.github_repo ? (
+                                  <div className="github-cell">
+                                    <span
+                                      className="mono truncate"
+                                      title={a.github_repo}
+                                    >
+                                      {a.github_repo}
+                                    </span>
+                                    <a
+                                      href={`https://github.com/${a.github_repo}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="icon-btn"
+                                      title="Open GitHub repo"
+                                    >
+                                      ↗
+                                    </a>
+                                  </div>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+
+                              {/* Actions */}
+                              <td>
+                                <div className="action-buttons">
+                                  {a.hosting_status === 'not_hosted' ||
+                                  a.hosting_status === 'failed' ? (
+                                    <button
+                                      className="small-btn"
+                                      onClick={() => handleHostAgent(a)}
+                                      title="Deploy to free hosting"
+                                    >
+                                      Host
+                                    </button>
+                                  ) : hostedUrl ? (
+                                    <a
+                                      href={hostedUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="small-btn success"
+                                      title="Open hosted URL"
+                                    >
+                                      Open
+                                    </a>
+                                  ) : (
+                                    <span className="muted">Hosting...</span>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td>{a.created_by}</td>
+                              <td>{formatDate(a.created_at)}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   ))}
 
+                {/* ========== HOSTING TAB ========== */}
                 {tab === 'hosting' &&
                   (hosting.length === 0 ? (
                     <div className="empty">No hosting records</div>
@@ -254,6 +373,7 @@ export default function App() {
                     </table>
                   ))}
 
+                {/* ========== ACCESS TAB ========== */}
                 {tab === 'access' &&
                   (access.length === 0 ? (
                     <div className="empty">No access records</div>
@@ -284,6 +404,7 @@ export default function App() {
                     </table>
                   ))}
 
+                {/* ========== DEPENDENCIES TAB ========== */}
                 {tab === 'dependencies' &&
                   (dependencies.length === 0 ? (
                     <div className="empty">No dependencies</div>
@@ -312,6 +433,7 @@ export default function App() {
                     </table>
                   ))}
 
+                {/* ========== DESTRUCTION TAB ========== */}
                 {tab === 'destruction' &&
                   (destruction.length === 0 ? (
                     <div className="empty">No destruction records</div>
@@ -357,6 +479,54 @@ export default function App() {
             if (type === 'guest') setIsGuest(true)
           }}
         />
+      )}
+
+      {/* Hosting Modal */}
+      {showHostModal && (
+        <div className="auth-overlay" onClick={() => setShowHostModal(false)}>
+          <div className="auth-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="auth-close" onClick={() => setShowHostModal(false)}>
+              ×
+            </button>
+            <h2>Host Agent</h2>
+            <p style={{ marginBottom: '1rem', color: 'var(--muted)' }}>
+              Deploy <strong>{selectedAgent?.name}</strong> to a free temporary host
+            </p>
+
+            <label style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
+              Select Provider
+            </label>
+            <select
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value)}
+              style={{
+                width: '100%',
+                marginTop: '0.4rem',
+                marginBottom: '1.2rem',
+                background: '#0f1117',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                padding: '0.7rem',
+                color: 'var(--text)',
+              }}
+            >
+              {hostingProviders.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.display_name} — {p.free_tier_summary}
+                </option>
+              ))}
+            </select>
+
+            <button
+              className="small-btn"
+              style={{ width: '100%', padding: '0.75rem' }}
+              onClick={confirmHosting}
+              disabled={hostingLoading}
+            >
+              {hostingLoading ? 'Deploying...' : 'Deploy Now'}
+            </button>
+          </div>
+        </div>
       )}
     </>
   )
