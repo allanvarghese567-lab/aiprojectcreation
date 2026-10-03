@@ -2,6 +2,9 @@
 -- Register Research Bot as an agent under BrahmAI
 -- and link dependency for hierarchy / orchestration
 -- =====================================================
+-- NOTE: hosting_status must match ai_agents_hosting_status_check.
+-- Allowed values typically include: not_hosted, pending, temporary,
+-- permanent, failed (NOT "live").
 
 ALTER TABLE public.ai_agents
   ADD COLUMN IF NOT EXISTS github_repo text,
@@ -25,7 +28,7 @@ SELECT
   'Research Bot',
   'research-bot',
   'active',
-  'live',
+  'not_hosted',
   'system',
   1,
   (SELECT id FROM public.ai_agents WHERE slug = 'brahmai' LIMIT 1),
