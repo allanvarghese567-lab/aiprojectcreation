@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 
+// All orchestrators can invoke Research Bot (via agent-runtime keyword routing
+// or by chatting directly with the research-bot tab).
 const ORCHESTRATORS = [
   { slug: 'brahmai', name: 'BrahmAI', badgeClass: 'brahma' },
   { slug: 'vishvai', name: 'VishvAI', badgeClass: 'vishva' },
   { slug: 'kaalai', name: 'KaalAI', badgeClass: 'kaal' },
+  { slug: 'research-bot', name: 'Research Bot', badgeClass: 'vishva' },
 ]
 
 export default function ChatPanel({ userName = 'you' }) {
@@ -13,7 +16,7 @@ export default function ChatPanel({ userName = 'you' }) {
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
-  const [thinking, setThinking] = useState(false) // ← new
+  const [thinking, setThinking] = useState(false)
   const scrollRef = useRef(null)
 
   useEffect(() => {
@@ -47,7 +50,6 @@ export default function ChatPanel({ userName = 'you' }) {
           filter: `agent_slug=eq.${activeSlug}`,
         },
         (payload) => {
-          // When a real agent reply arrives, stop thinking
           if (payload.new.role === 'agent') {
             setThinking(false)
           }
@@ -80,7 +82,7 @@ export default function ChatPanel({ userName = 'you' }) {
 
     setSending(true)
     setDraft('')
-    setThinking(true) // ← start thinking indicator
+    setThinking(true)
 
     // Optimistic user message
     const tempId = crypto.randomUUID()
@@ -119,12 +121,18 @@ export default function ChatPanel({ userName = 'you' }) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? inserted : m)))
     }
 
-    // Call agent-runtime
+    // Call agent-runtime — pass user_id so research_requests FK / RLS work
+    // BrahmAI, VishvAI, KaalAI, and Research Bot can all queue research jobs.
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
       const { error: fnError } = await supabase.functions.invoke('agent-runtime', {
         body: {
           agent_slug: activeSlug,
           content: content,
+          user_id: session?.user?.id ?? null,
         },
       })
 
@@ -138,7 +146,7 @@ export default function ChatPanel({ userName = 'you' }) {
     }
 
     setSending(false)
-    // Note: setThinking(false) is also called when Realtime receives the agent reply
+    // setThinking(false) also runs when Realtime receives the agent reply
   }
 
   const active = ORCHESTRATORS.find((o) => o.slug === activeSlug)
@@ -163,9 +171,18 @@ export default function ChatPanel({ userName = 'you' }) {
             <div className="loading">Loading messages...</div>
           ) : messages.length === 0 && !thinking ? (
             <div className="empty">
-              No messages with <strong>{active.name}</strong> yet.
+              No messages with <strong>{active?.name}</strong> yet.
               <br />
               Type a message below to start the conversation.
+              {activeSlug !== 'research-bot' && (
+                <>
+                  <br />
+                  <span style={{ opacity: 0.75, fontSize: '0.9em' }}>
+                    Research-style questions (market, ticker, sources, outlook…)
+                    are routed through Research Bot automatically.
+                  </span>
+                </>
+              )}
             </div>
           ) : (
             <>
@@ -173,7 +190,7 @@ export default function ChatPanel({ userName = 'you' }) {
                 <div key={m.id} className={`chat-msg ${m.role}`}>
                   <div className="chat-msg-meta">
                     <span>
-                      {m.role === 'agent' ? active.name : m.created_by || 'you'}
+                      {m.role === 'agent' ? active?.name : m.created_by || 'you'}
                     </span>
                     <span>{new Date(m.created_at).toLocaleTimeString()}</span>
                   </div>
@@ -181,11 +198,10 @@ export default function ChatPanel({ userName = 'you' }) {
                 </div>
               ))}
 
-              {/* Thinking indicator */}
               {thinking && (
                 <div className="chat-msg agent thinking">
                   <div className="chat-msg-meta">
-                    <span>{active.name}</span>
+                    <span>{active?.name}</span>
                   </div>
                   <div className="chat-msg-content thinking-text">
                     <span className="thinking-label">Thinking</span>
@@ -209,7 +225,11 @@ export default function ChatPanel({ userName = 'you' }) {
               type="text"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={`Message ${active.name}...`}
+              placeholder={
+                activeSlug === 'research-bot'
+                  ? 'Ask Research Bot (e.g. outlook on NVDA with sources)…'
+                  : `Message ${active?.name}…`
+              }
               disabled={sending}
             />
 
