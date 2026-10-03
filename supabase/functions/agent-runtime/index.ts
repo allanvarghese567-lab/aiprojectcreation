@@ -2,14 +2,14 @@
  * Supabase Edge Function: agent-runtime
  *
  * Option A integration — same Supabase project as research-bot tables.
+ * Supports multi-thread chats via body.thread_id.
  *
  * Deploy:
- *   supabase functions deploy agent-runtime --no-verify-jwt  # or with JWT as preferred
+ *   supabase functions deploy agent-runtime
  *
- * Secrets (supabase secrets set ...):
+ * Secrets:
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
- *   GROQ_API_KEY / GEMINI_API_KEY (for normal chat path)
- *   Optional: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO  (instant research dispatch)
+ *   Optional: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -35,6 +35,7 @@ Deno.serve(async (req) => {
     const agentSlug: string = body.agent_slug || "brahmai";
     const content: string = (body.content || "").trim();
     const userId: string | undefined = body.user_id;
+    const threadId: string | undefined = body.thread_id;
 
     if (!content) {
       return cors(json({ error: "content required" }, 400));
@@ -48,7 +49,8 @@ Deno.serve(async (req) => {
         await insertMessage(
           agentSlug,
           "agent",
-          "Research needs a signed-in user. Please log in and try again."
+          "Research needs a signed-in user. Please log in and try again.",
+          threadId
         );
         return cors(json({ ok: true, mode: "research_auth_required" }));
       }
@@ -56,7 +58,8 @@ Deno.serve(async (req) => {
       await insertMessage(
         agentSlug,
         "agent",
-        "Running evidence-backed research… This may take up to a few minutes while the worker processes sources."
+        "Running evidence-backed research… This may take up to a few minutes while the worker processes sources.",
+        threadId
       );
 
       const { data: reqRow, error: insErr } = await sb
@@ -74,7 +77,8 @@ Deno.serve(async (req) => {
         await insertMessage(
           agentSlug,
           "agent",
-          `Could not queue research: ${insErr.message}`
+          `Could not queue research: ${insErr.message}`,
+          threadId
         );
         return cors(json({ error: insErr.message }, 500));
       }
@@ -84,14 +88,15 @@ Deno.serve(async (req) => {
       const ticket = await pollTicket(reqRow.id, 45_000);
 
       if (ticket) {
-        await insertMessage(agentSlug, "agent", formatTicket(ticket));
+        await insertMessage(agentSlug, "agent", formatTicket(ticket), threadId);
         return cors(json({ ok: true, mode: "research_done", request_id: reqRow.id }));
       }
 
       await insertMessage(
         agentSlug,
         "agent",
-        `Research queued (id: \`${reqRow.id}\`). The worker is still running — check back shortly or open Research Bot for the full ticket.`
+        `Research queued (id: \`${reqRow.id}\`). The worker is still running — check back shortly or open Research Bot for the full ticket.`,
+        threadId
       );
       return cors(json({ ok: true, mode: "research_queued", request_id: reqRow.id }));
     }
@@ -100,7 +105,7 @@ Deno.serve(async (req) => {
       `(${agentSlug}) Received: "${content}". ` +
       `For evidence-backed market or topic research, ask a research-style question or chat with Research Bot.`;
 
-    await insertMessage(agentSlug, "agent", reply);
+    await insertMessage(agentSlug, "agent", reply, threadId);
     return cors(json({ ok: true, mode: "chat" }));
   } catch (e) {
     console.error(e);
@@ -108,13 +113,20 @@ Deno.serve(async (req) => {
   }
 });
 
-async function insertMessage(agentSlug: string, role: string, content: string) {
-  await sb.from("agent_messages").insert({
+async function insertMessage(
+  agentSlug: string,
+  role: string,
+  content: string,
+  threadId?: string
+) {
+  const row: Record<string, unknown> = {
     agent_slug: agentSlug,
     role,
     content,
     created_by: role === "agent" ? agentSlug : "user",
-  });
+  };
+  if (threadId) row.thread_id = threadId;
+  await sb.from("agent_messages").insert(row);
 }
 
 async function pollTicket(requestId: string, timeoutMs: number) {
