@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 
-/**
- * Chat tabs = orchestrators only.
- * Research Bot is the shared AI engine behind all three (agent-runtime
- * routes research-style questions and can power general replies).
- */
 const ORCHESTRATORS = [
   { slug: 'brahmai', name: 'BrahmAI', badgeClass: 'brahma' },
   { slug: 'vishvai', name: 'VishvAI', badgeClass: 'vishva' },
@@ -30,6 +25,33 @@ function formatThreadTime(iso) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
+function IconCopy() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  )
+}
+
+function IconEdit() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  )
+}
+
+function IconRetry() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  )
+}
+
 export default function ChatPanel({ userName = 'you' }) {
   const [activeSlug, setActiveSlug] = useState(ORCHESTRATORS[0].slug)
   const [threads, setThreads] = useState([])
@@ -40,7 +62,11 @@ export default function ChatPanel({ userName = 'you' }) {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
   const [thinking, setThinking] = useState(false)
+  const [copiedId, setCopiedId] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [editText, setEditText] = useState('')
   const scrollRef = useRef(null)
+  const inputRef = useRef(null)
 
   const loadThreads = useCallback(async (slug) => {
     setLoadingThreads(true)
@@ -68,6 +94,7 @@ export default function ChatPanel({ userName = 'you' }) {
   useEffect(() => {
     setMessages([])
     setThinking(false)
+    setEditingId(null)
     loadThreads(activeSlug)
   }, [activeSlug, loadThreads])
 
@@ -160,6 +187,7 @@ export default function ChatPanel({ userName = 'you' }) {
     setMessages([])
     setThinking(false)
     setDraft('')
+    setEditingId(null)
   }
 
   async function ensureThread() {
@@ -186,21 +214,21 @@ export default function ChatPanel({ userName = 'you' }) {
     return data.id
   }
 
-  async function sendMessage(e) {
-    e.preventDefault()
-    const content = draft.trim()
-    if (!content || sending) return
+  async function submitContent(content, { clearDraft = true } = {}) {
+    const text = (content || '').trim()
+    if (!text || sending) return
 
     setSending(true)
-    setDraft('')
+    if (clearDraft) setDraft('')
     setThinking(true)
+    setEditingId(null)
 
     let threadId
     try {
       threadId = await ensureThread()
     } catch (err) {
       console.error(err)
-      setDraft(content)
+      if (clearDraft) setDraft(text)
       setSending(false)
       setThinking(false)
       alert('Could not open a chat thread.')
@@ -213,7 +241,7 @@ export default function ChatPanel({ userName = 'you' }) {
       agent_slug: activeSlug,
       thread_id: threadId,
       role: 'user',
-      content,
+      content: text,
       created_by: userName,
       created_at: new Date().toISOString(),
     }
@@ -221,7 +249,7 @@ export default function ChatPanel({ userName = 'you' }) {
 
     const currentThread = threads.find((t) => t.id === threadId)
     if (!currentThread || currentThread.title === 'New chat') {
-      const newTitle = titleFromContent(content)
+      const newTitle = titleFromContent(text)
       await supabase
         .from('agent_chat_threads')
         .update({ title: newTitle, updated_at: new Date().toISOString() })
@@ -254,7 +282,7 @@ export default function ChatPanel({ userName = 'you' }) {
         agent_slug: activeSlug,
         thread_id: threadId,
         role: 'user',
-        content,
+        content: text,
         created_by: userName,
       })
       .select()
@@ -263,7 +291,7 @@ export default function ChatPanel({ userName = 'you' }) {
     if (error) {
       console.error('Failed to send message', error)
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
-      setDraft(content)
+      if (clearDraft) setDraft(text)
       setSending(false)
       setThinking(false)
       return
@@ -273,7 +301,6 @@ export default function ChatPanel({ userName = 'you' }) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? inserted : m)))
     }
 
-    // Orchestrator chat → agent-runtime (Research Bot is the engine for research paths)
     try {
       const {
         data: { session },
@@ -282,7 +309,7 @@ export default function ChatPanel({ userName = 'you' }) {
       const { error: fnError } = await supabase.functions.invoke('agent-runtime', {
         body: {
           agent_slug: activeSlug,
-          content,
+          content: text,
           user_id: session?.user?.id ?? null,
           thread_id: threadId,
           engine: 'research-bot',
@@ -299,6 +326,71 @@ export default function ChatPanel({ userName = 'you' }) {
     }
 
     setSending(false)
+  }
+
+  async function sendMessage(e) {
+    e.preventDefault()
+    await submitContent(draft)
+  }
+
+  async function copyMessage(m) {
+    try {
+      await navigator.clipboard.writeText(m.content || '')
+      setCopiedId(m.id)
+      setTimeout(() => setCopiedId((id) => (id === m.id ? null : id)), 1500)
+    } catch (err) {
+      console.error('Copy failed', err)
+      alert('Could not copy to clipboard')
+    }
+  }
+
+  function startEdit(m) {
+    setEditingId(m.id)
+    setEditText(m.content || '')
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditText('')
+  }
+
+  async function saveEdit(m) {
+    const text = editText.trim()
+    if (!text) return
+
+    // Update stored user message, then resubmit as a new turn (retry path)
+    if (m.role === 'user' && m.id && !String(m.id).includes('-') === false) {
+      // real uuid from DB — try update
+      const { error } = await supabase
+        .from('agent_messages')
+        .update({ content: text })
+        .eq('id', m.id)
+      if (!error) {
+        setMessages((prev) =>
+          prev.map((x) => (x.id === m.id ? { ...x, content: text } : x))
+        )
+      }
+    }
+
+    setEditingId(null)
+    setEditText('')
+    // Re-run agent on edited text
+    await submitContent(text, { clearDraft: false })
+  }
+
+  async function retryMessage(m) {
+    // Prefer last user message content for agent retries
+    let content = m.content
+    if (m.role === 'agent') {
+      const idx = messages.findIndex((x) => x.id === m.id)
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          content = messages[i].content
+          break
+        }
+      }
+    }
+    await submitContent(content, { clearDraft: false })
   }
 
   async function deleteThread(threadId, e) {
@@ -362,6 +454,7 @@ export default function ChatPanel({ userName = 'you' }) {
                 onClick={() => {
                   setActiveThreadId(t.id)
                   setThinking(false)
+                  setEditingId(null)
                 }}
               >
                 <span className="chat-thread-title">{t.title || 'New chat'}</span>
@@ -394,10 +487,6 @@ export default function ChatPanel({ userName = 'you' }) {
               <br />
               Click <em>+ New chat</em> to start a conversation with{' '}
               <strong>{active?.name}</strong>.
-              <br />
-              <span style={{ opacity: 0.75, fontSize: '0.9em' }}>
-                Powered by Research Bot as the shared AI engine.
-              </span>
             </div>
           ) : messages.length === 0 && !thinking ? (
             <div className="empty">
@@ -420,7 +509,65 @@ export default function ChatPanel({ userName = 'you' }) {
                     </span>
                     <span>{new Date(m.created_at).toLocaleTimeString()}</span>
                   </div>
-                  <div className="chat-msg-content">{m.content}</div>
+
+                  {editingId === m.id ? (
+                    <div className="chat-edit-box">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="chat-edit-actions">
+                        <button type="button" className="chat-action-btn primary" onClick={() => saveEdit(m)} disabled={sending}>
+                          Save & send
+                        </button>
+                        <button type="button" className="chat-action-btn" onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="chat-msg-content">{m.content}</div>
+                  )}
+
+                  {editingId !== m.id && (
+                    <div className="chat-msg-actions">
+                      <button
+                        type="button"
+                        className="chat-msg-action"
+                        title="Copy"
+                        onClick={() => copyMessage(m)}
+                      >
+                        <IconCopy />
+                        <span>{copiedId === m.id ? 'Copied' : 'Copy'}</span>
+                      </button>
+
+                      {m.role === 'user' && (
+                        <button
+                          type="button"
+                          className="chat-msg-action"
+                          title="Edit"
+                          onClick={() => startEdit(m)}
+                          disabled={sending}
+                        >
+                          <IconEdit />
+                          <span>Edit</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="chat-msg-action"
+                        title="Retry"
+                        onClick={() => retryMessage(m)}
+                        disabled={sending}
+                      >
+                        <IconRetry />
+                        <span>Retry</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
 
@@ -453,6 +600,7 @@ export default function ChatPanel({ userName = 'you' }) {
             </button>
 
             <input
+              ref={inputRef}
               type="text"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
