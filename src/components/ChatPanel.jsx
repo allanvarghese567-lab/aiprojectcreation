@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 
-// All orchestrators can invoke Research Bot (via agent-runtime keyword routing
-// or by chatting directly with the research-bot tab).
+/**
+ * Chat tabs = orchestrators only.
+ * Research Bot is the shared AI engine behind all three (agent-runtime
+ * routes research-style questions and can power general replies).
+ */
 const ORCHESTRATORS = [
   { slug: 'brahmai', name: 'BrahmAI', badgeClass: 'brahma' },
   { slug: 'vishvai', name: 'VishvAI', badgeClass: 'vishva' },
   { slug: 'kaalai', name: 'KaalAI', badgeClass: 'kaal' },
-  { slug: 'research-bot', name: 'Research Bot', badgeClass: 'vishva' },
 ]
 
 function titleFromContent(text) {
@@ -39,11 +41,6 @@ export default function ChatPanel({ userName = 'you' }) {
   const [sending, setSending] = useState(false)
   const [thinking, setThinking] = useState(false)
   const scrollRef = useRef(null)
-  const activeThreadIdRef = useRef(null)
-
-  useEffect(() => {
-    activeThreadIdRef.current = activeThreadId
-  }, [activeThreadId])
 
   const loadThreads = useCallback(async (slug) => {
     setLoadingThreads(true)
@@ -68,14 +65,12 @@ export default function ChatPanel({ userName = 'you' }) {
     setLoadingThreads(false)
   }, [])
 
-  // Load threads when agent changes
   useEffect(() => {
     setMessages([])
     setThinking(false)
     loadThreads(activeSlug)
   }, [activeSlug, loadThreads])
 
-  // Load messages + realtime for active thread
   useEffect(() => {
     let cancelled = false
     let channel = null
@@ -224,7 +219,6 @@ export default function ChatPanel({ userName = 'you' }) {
     }
     setMessages((prev) => [...prev, tempMessage])
 
-    // Rename "New chat" from first user message
     const currentThread = threads.find((t) => t.id === threadId)
     if (!currentThread || currentThread.title === 'New chat') {
       const newTitle = titleFromContent(content)
@@ -279,6 +273,7 @@ export default function ChatPanel({ userName = 'you' }) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? inserted : m)))
     }
 
+    // Orchestrator chat → agent-runtime (Research Bot is the engine for research paths)
     try {
       const {
         data: { session },
@@ -290,6 +285,7 @@ export default function ChatPanel({ userName = 'you' }) {
           content,
           user_id: session?.user?.id ?? null,
           thread_id: threadId,
+          engine: 'research-bot',
         },
       })
 
@@ -330,7 +326,6 @@ export default function ChatPanel({ userName = 'you' }) {
 
   return (
     <div className="chat-panel">
-      {/* Agent switcher */}
       <div className="chat-agent-list">
         {ORCHESTRATORS.map((o) => (
           <button
@@ -341,9 +336,9 @@ export default function ChatPanel({ userName = 'you' }) {
             <span className={`badge ${o.badgeClass}`}>{o.name}</span>
           </button>
         ))}
+        <p className="chat-engine-hint">Engine: Research Bot</p>
       </div>
 
-      {/* Thread list */}
       <div className="chat-thread-list">
         <button type="button" className="chat-new-btn" onClick={createNewThread}>
           + New chat
@@ -389,7 +384,6 @@ export default function ChatPanel({ userName = 'you' }) {
         </div>
       </div>
 
-      {/* Messages */}
       <div className="chat-body">
         <div className="chat-messages" ref={scrollRef}>
           {loadingMessages ? (
@@ -400,21 +394,21 @@ export default function ChatPanel({ userName = 'you' }) {
               <br />
               Click <em>+ New chat</em> to start a conversation with{' '}
               <strong>{active?.name}</strong>.
+              <br />
+              <span style={{ opacity: 0.75, fontSize: '0.9em' }}>
+                Powered by Research Bot as the shared AI engine.
+              </span>
             </div>
           ) : messages.length === 0 && !thinking ? (
             <div className="empty">
               No messages in this chat yet.
               <br />
               Type below to message <strong>{active?.name}</strong>.
-              {activeSlug !== 'research-bot' && (
-                <>
-                  <br />
-                  <span style={{ opacity: 0.75, fontSize: '0.9em' }}>
-                    Research-style questions are routed through Research Bot
-                    automatically.
-                  </span>
-                </>
-              )}
+              <br />
+              <span style={{ opacity: 0.75, fontSize: '0.9em' }}>
+                Research-style questions use the Research Bot engine
+                (evidence, sources, calibrated confidence).
+              </span>
             </div>
           ) : (
             <>
@@ -462,16 +456,12 @@ export default function ChatPanel({ userName = 'you' }) {
               type="text"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={
-                activeSlug === 'research-bot'
-                  ? 'Ask Research Bot (e.g. outlook on NVDA with sources)…'
-                  : `Message ${active?.name}…`
-              }
+              placeholder={`Message ${active?.name}…`}
               disabled={sending}
             />
 
             <div className="chat-input-actions">
-              <span className="chat-model-label">Fast</span>
+              <span className="chat-model-label">Research Bot</span>
               <button
                 type="submit"
                 className="chat-send-btn"
