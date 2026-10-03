@@ -65,6 +65,7 @@ export default function ChatPanel({ userName = 'you' }) {
   const [copiedId, setCopiedId] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
+  const [composerFocused, setComposerFocused] = useState(false)
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -159,6 +160,14 @@ export default function ChatPanel({ userName = 'you' }) {
       behavior: 'smooth',
     })
   }, [messages, thinking])
+
+  // Auto-grow composer
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px'
+  }, [draft])
 
   async function createNewThread() {
     const {
@@ -333,6 +342,13 @@ export default function ChatPanel({ userName = 'you' }) {
     await submitContent(draft)
   }
 
+  function onComposerKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submitContent(draft)
+    }
+  }
+
   async function copyMessage(m) {
     try {
       await navigator.clipboard.writeText(m.content || '')
@@ -358,9 +374,7 @@ export default function ChatPanel({ userName = 'you' }) {
     const text = editText.trim()
     if (!text) return
 
-    // Update stored user message, then resubmit as a new turn (retry path)
-    if (m.role === 'user' && m.id && !String(m.id).includes('-') === false) {
-      // real uuid from DB — try update
+    if (m.role === 'user' && m.id) {
       const { error } = await supabase
         .from('agent_messages')
         .update({ content: text })
@@ -374,12 +388,10 @@ export default function ChatPanel({ userName = 'you' }) {
 
     setEditingId(null)
     setEditText('')
-    // Re-run agent on edited text
     await submitContent(text, { clearDraft: false })
   }
 
   async function retryMessage(m) {
-    // Prefer last user message content for agent retries
     let content = m.content
     if (m.role === 'agent') {
       const idx = messages.findIndex((x) => x.id === m.id)
@@ -417,7 +429,7 @@ export default function ChatPanel({ userName = 'you' }) {
   const active = ORCHESTRATORS.find((o) => o.slug === activeSlug)
 
   return (
-    <div className="chat-panel">
+    <div className={`chat-panel ${composerFocused ? 'composer-focused' : ''}`}>
       <div className="chat-agent-list">
         {ORCHESTRATORS.map((o) => (
           <button
@@ -485,19 +497,13 @@ export default function ChatPanel({ userName = 'you' }) {
             <div className="empty">
               <strong>No chat selected</strong>
               <br />
-              Click <em>+ New chat</em> to start a conversation with{' '}
-              <strong>{active?.name}</strong>.
+              Click <em>+ New chat</em> to start with <strong>{active?.name}</strong>.
             </div>
           ) : messages.length === 0 && !thinking ? (
             <div className="empty">
               No messages in this chat yet.
               <br />
               Type below to message <strong>{active?.name}</strong>.
-              <br />
-              <span style={{ opacity: 0.75, fontSize: '0.9em' }}>
-                Research-style questions use the Research Bot engine
-                (evidence, sources, calibrated confidence).
-              </span>
             </div>
           ) : (
             <>
@@ -519,7 +525,12 @@ export default function ChatPanel({ userName = 'you' }) {
                         autoFocus
                       />
                       <div className="chat-edit-actions">
-                        <button type="button" className="chat-action-btn primary" onClick={() => saveEdit(m)} disabled={sending}>
+                        <button
+                          type="button"
+                          className="chat-action-btn primary"
+                          onClick={() => saveEdit(m)}
+                          disabled={sending}
+                        >
                           Save & send
                         </button>
                         <button type="button" className="chat-action-btn" onClick={cancelEdit}>
@@ -588,27 +599,33 @@ export default function ChatPanel({ userName = 'you' }) {
           )}
         </div>
 
+        {/* Grok-style composer: all controls inside one bar */}
         <form className="chat-input-bar" onSubmit={sendMessage}>
           <div className="chat-input-inner">
-            <button
-              type="button"
-              className="chat-icon-btn"
-              title="New chat"
-              onClick={createNewThread}
-            >
-              +
-            </button>
-
-            <input
-              ref={inputRef}
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={`Message ${active?.name}…`}
-              disabled={sending}
-            />
-
-            <div className="chat-input-actions">
+            <div className="chat-composer-top">
+              <button
+                type="button"
+                className="chat-icon-btn"
+                title="New chat"
+                onClick={createNewThread}
+              >
+                +
+              </button>
+              <textarea
+                ref={inputRef}
+                className="chat-composer-input"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onComposerKeyDown}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
+                placeholder={`Message ${active?.name}…`}
+                disabled={sending}
+                rows={1}
+                enterKeyHint="send"
+              />
+            </div>
+            <div className="chat-composer-bottom">
               <span className="chat-model-label">Research Bot</span>
               <button
                 type="submit"
